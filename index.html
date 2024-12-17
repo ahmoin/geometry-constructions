@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Geometry Constructions</title>
+    <style>
+      .canvas-container {
+        position: relative;
+        margin: 20px;
+        width: 600px;
+        height: 400px;
+      }
+      canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        border: 1px solid #000;
+      }
+      #straightedgeCanvas {
+        pointer-events: none;
+      }
+      .straightedge-control {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        background: rgba(60, 60, 255, 0.5);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        cursor: move;
+        display: none;
+        z-index: 1;
+      }
+      .straightedge-control.active {
+        display: block;
+      }
+      .toolbar {
+        margin: 20px;
+      }
+      button {
+        padding: 5px 10px;
+        margin-right: 10px;
+      }
+      .compass-control {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        cursor: move;
+        display: none;
+        z-index: 1;
+      }
+      .compass-control.active {
+        display: block;
+      }
+      #compassCenter {
+        background: rgba(255, 60, 60, 0.5);
+      }
+      #compassPoint {
+        background: rgba(60, 60, 255, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <button onclick="toggleStraightedge()">Toggle Straightedge</button>
+      <button onclick="toggleCompass()">Toggle Compass</button>
+    </div>
+    <div class="canvas-container">
+      <canvas id="drawingCanvas" width="600" height="400"></canvas>
+      <canvas id="straightedgeCanvas" width="600" height="400"></canvas>
+      <div id="startHandle" class="straightedge-control"></div>
+      <div id="endHandle" class="straightedge-control"></div>
+      <div id="compassCenter" class="compass-control"></div>
+      <div id="compassPoint" class="compass-control"></div>
+    </div>
+    <script>
+      const drawingCanvas = document.getElementById("drawingCanvas");
+      const straightedgeCanvas = document.getElementById("straightedgeCanvas");
+      const ctx = drawingCanvas.getContext("2d");
+      const straightedgeCtx = straightedgeCanvas.getContext("2d");
+
+      let isDrawing = false;
+      let lastX = 0;
+      let lastY = 0;
+
+      // Straightedge properties
+      let straightedgeActive = false;
+      let straightedgeStart = { x: 100, y: 200 };
+      let straightedgeEnd = { x: 500, y: 200 };
+      let isDraggingStraightedge = false;
+      const snapDistance = 10;
+      const straightedgeWidth = 20;
+      let savedImageData = null;
+
+      const startHandle = document.getElementById("startHandle");
+      const endHandle = document.getElementById("endHandle");
+      let activeHandle = null;
+
+      let activeEdge = null;
+
+      let startedInStraightedge = false;
+
+      let compassActive = false;
+      let compassCenter = { x: 300, y: 200 };
+      let compassPoint = { x: 400, y: 200 };
+      let activeCompassHandle = null;
+      let isDrawingArc = false;
+      let arcStartAngle = 0;
+
+      const compassCenterHandle = document.getElementById("compassCenter");
+      const compassPointHandle = document.getElementById("compassPoint");
+
+      function updateHandlePositions() {
+        startHandle.style.left = straightedgeStart.x + "px";
+        startHandle.style.top = straightedgeStart.y + "px";
+        endHandle.style.left = straightedgeEnd.x + "px";
+        endHandle.style.top = straightedgeEnd.y + "px";
+      }
+
+      function drawStraightedge() {
+        straightedgeCtx.clearRect(
+          0,
+          0,
+          straightedgeCanvas.width,
+          straightedgeCanvas.height,
+        );
+        if (!straightedgeActive) return;
+
+        const dx = straightedgeEnd.x - straightedgeStart.x;
+        const dy = straightedgeEnd.y - straightedgeStart.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const nx = (-dy / length) * (straightedgeWidth / 2);
+        const ny = (dx / length) * (straightedgeWidth / 2);
+
+        straightedgeCtx.save();
+        straightedgeCtx.beginPath();
+        straightedgeCtx.moveTo(
+          straightedgeStart.x + nx,
+          straightedgeStart.y + ny,
+        );
+        straightedgeCtx.lineTo(straightedgeEnd.x + nx, straightedgeEnd.y + ny);
+        straightedgeCtx.lineTo(straightedgeEnd.x - nx, straightedgeEnd.y - ny);
+        straightedgeCtx.lineTo(
+          straightedgeStart.x - nx,
+          straightedgeStart.y - ny,
+        );
+        straightedgeCtx.closePath();
+        straightedgeCtx.fillStyle = "rgba(102, 102, 102, 0.3)";
+        straightedgeCtx.fill();
+        straightedgeCtx.restore();
+      }
+
+      function distanceToLine(px, py, x1, y1, x2, y2) {
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+        if (lenSq !== 0) param = dot / lenSq;
+
+        let xx, yy;
+        if (param < 0) {
+          xx = x1;
+          yy = y1;
+        } else if (param > 1) {
+          xx = x2;
+          yy = y2;
+        } else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+        }
+
+        const dx = px - xx;
+        const dy = py - yy;
+        return {
+          distance: Math.sqrt(dx * dx + dy * dy),
+          point: { x: xx, y: yy },
+        };
+      }
+
+      function distanceToEdges(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const nx = (-dy / length) * (straightedgeWidth / 2);
+        const ny = (dx / length) * (straightedgeWidth / 2);
+
+        const topEdge = distanceToLine(
+          px,
+          py,
+          x1 + nx,
+          y1 + ny,
+          x2 + nx,
+          y2 + ny,
+        );
+        const bottomEdge = distanceToLine(
+          px,
+          py,
+          x1 - nx,
+          y1 - ny,
+          x2 - nx,
+          y2 - ny,
+        );
+
+        return topEdge.distance < bottomEdge.distance ? topEdge : bottomEdge;
+      }
+
+      function isPointInStraightedge(px, py) {
+        const dx = straightedgeEnd.x - straightedgeStart.x;
+        const dy = straightedgeEnd.y - straightedgeStart.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const nx = (-dy / length) * (straightedgeWidth / 2);
+        const ny = (dx / length) * (straightedgeWidth / 2);
+
+        const corners = [
+          { x: straightedgeStart.x + nx, y: straightedgeStart.y + ny },
+          { x: straightedgeEnd.x + nx, y: straightedgeEnd.y + ny },
+          { x: straightedgeEnd.x - nx, y: straightedgeEnd.y - ny },
+          { x: straightedgeStart.x - nx, y: straightedgeStart.y - ny },
+        ];
+
+        let inside = false;
+        for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+          const xi = corners[i].x,
+            yi = corners[i].y;
+          const xj = corners[j].x,
+            yj = corners[j].y;
+
+          const intersect =
+            yi > py != yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      function draw(e) {
+        if (!isDrawing) return;
+        const rect = drawingCanvas.getBoundingClientRect();
+        let x = e.clientX - rect.left;
+        let y = e.clientY - rect.top;
+
+        if (straightedgeActive) {
+          const dx = straightedgeEnd.x - straightedgeStart.x;
+          const dy = straightedgeEnd.y - straightedgeStart.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          const nx = (-dy / length) * (straightedgeWidth / 2);
+          const ny = (dx / length) * (straightedgeWidth / 2);
+
+          const topEdge = distanceToLine(
+            x,
+            y,
+            straightedgeStart.x + nx,
+            straightedgeStart.y + ny,
+            straightedgeEnd.x + nx,
+            straightedgeEnd.y + ny,
+          );
+          const bottomEdge = distanceToLine(
+            x,
+            y,
+            straightedgeStart.x - nx,
+            straightedgeStart.y - ny,
+            straightedgeEnd.x - nx,
+            straightedgeEnd.y - ny,
+          );
+
+          const inStraightedge = isPointInStraightedge(x, y);
+
+          if (startedInStraightedge) {
+            if (!inStraightedge) {
+              startedInStraightedge = false;
+              [lastX, lastY] = [x, y];
+            }
+            return;
+          }
+
+          if (inStraightedge) {
+            if (activeEdge) {
+              const result = activeEdge === "top" ? topEdge : bottomEdge;
+              x = result.point.x;
+              y = result.point.y;
+            } else {
+              isDrawing = false;
+              return;
+            }
+          } else if (
+            (activeEdge === "top" && topEdge.distance < snapDistance) ||
+            (activeEdge === "bottom" && bottomEdge.distance < snapDistance)
+          ) {
+            const result = activeEdge === "top" ? topEdge : bottomEdge;
+            x = result.point.x;
+            y = result.point.y;
+          } else if (
+            !activeEdge &&
+            (topEdge.distance < snapDistance ||
+              bottomEdge.distance < snapDistance)
+          ) {
+            activeEdge =
+              topEdge.distance < bottomEdge.distance ? "top" : "bottom";
+            const result = activeEdge === "top" ? topEdge : bottomEdge;
+            x = result.point.x;
+            y = result.point.y;
+          }
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        [lastX, lastY] = [x, y];
+      }
+
+      function toggleStraightedge() {
+        straightedgeActive = !straightedgeActive;
+        startHandle.classList.toggle("active");
+        endHandle.classList.toggle("active");
+        drawStraightedge();
+      }
+
+      function toggleCompass() {
+        compassActive = !compassActive;
+        compassCenterHandle.classList.toggle("active");
+        compassPointHandle.classList.toggle("active");
+        updateCompassHandles();
+      }
+
+      function updateCompassHandles() {
+        compassCenterHandle.style.left = compassCenter.x + "px";
+        compassCenterHandle.style.top = compassCenter.y + "px";
+        compassPointHandle.style.left = compassPoint.x + "px";
+        compassPointHandle.style.top = compassPoint.y + "px";
+      }
+
+      function drawArc(startAngle, endAngle) {
+        const radius = Math.hypot(
+          compassPoint.x - compassCenter.x,
+          compassPoint.y - compassCenter.y,
+        );
+
+        ctx.beginPath();
+        ctx.arc(compassCenter.x, compassCenter.y, radius, startAngle, endAngle);
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      compassCenterHandle.addEventListener("mousedown", (e) => {
+        if (!compassActive) return;
+        activeCompassHandle = "center";
+        e.preventDefault();
+      });
+
+      compassPointHandle.addEventListener("mousedown", (e) => {
+        if (!compassActive) return;
+        activeCompassHandle = "point";
+        e.preventDefault();
+      });
+
+      drawingCanvas.addEventListener("mousedown", (e) => {
+        if (compassActive) {
+          const rect = drawingCanvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+
+          const radius = Math.hypot(
+            compassPoint.x - compassCenter.x,
+            compassPoint.y - compassCenter.y,
+          );
+          const clickRadius = Math.hypot(
+            x - compassCenter.x,
+            y - compassCenter.y,
+          );
+
+          if (Math.abs(clickRadius - radius) < snapDistance) {
+            isDrawingArc = true;
+            arcStartAngle = Math.atan2(
+              y - compassCenter.y,
+              x - compassCenter.x,
+            );
+          }
+          return;
+        }
+      });
+
+      drawingCanvas.addEventListener("mousemove", (e) => {
+        if (isDrawingArc) {
+          const rect = drawingCanvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+
+          const currentAngle = Math.atan2(
+            y - compassCenter.y,
+            x - compassCenter.x,
+          );
+
+          drawArc(arcStartAngle, currentAngle);
+          return;
+        }
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (!activeCompassHandle) return;
+        const rect = drawingCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (activeCompassHandle === "center") {
+          const dx = x - compassCenter.x;
+          const dy = y - compassCenter.y;
+          compassCenter.x = x;
+          compassCenter.y = y;
+          compassPoint.x += dx;
+          compassPoint.y += dy;
+        } else {
+          compassPoint.x = x;
+          compassPoint.y = y;
+        }
+
+        updateCompassHandles();
+      });
+
+      document.addEventListener("mouseup", () => {
+        activeCompassHandle = null;
+        isDrawingArc = false;
+      });
+
+      startHandle.addEventListener("mousedown", (e) => {
+        if (!straightedgeActive) return;
+        activeHandle = "start";
+        e.preventDefault();
+      });
+
+      endHandle.addEventListener("mousedown", (e) => {
+        if (!straightedgeActive) return;
+        activeHandle = "end";
+        e.preventDefault();
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (!activeCompassHandle && !activeHandle) return;
+        const rect = drawingCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        if (activeCompassHandle) {
+          if (activeCompassHandle === "center") {
+            const dx = x - compassCenter.x;
+            const dy = y - compassCenter.y;
+            compassCenter.x = x;
+            compassCenter.y = y;
+            compassPoint.x += dx;
+            compassPoint.y += dy;
+          } else {
+            compassPoint.x = x;
+            compassPoint.y = y;
+          }
+          updateCompassHandles();
+        } else if (activeHandle) {
+          if (activeHandle === "start") {
+            straightedgeStart.x = x;
+            straightedgeStart.y = y;
+          } else {
+            straightedgeEnd.x = x;
+            straightedgeEnd.y = y;
+          }
+          updateHandlePositions();
+          drawStraightedge();
+        }
+      });
+
+      document.addEventListener("mouseup", () => {
+        activeCompassHandle = null;
+        activeHandle = null;
+        isDrawingArc = false;
+      });
+
+      updateHandlePositions();
+      updateCompassHandles();
+
+      drawingCanvas.addEventListener("mousedown", (e) => {
+        const rect = drawingCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        activeEdge = null;
+        startedInStraightedge =
+          straightedgeActive && isPointInStraightedge(x, y);
+
+        if (!startedInStraightedge) {
+          isDrawing = true;
+          if (straightedgeActive) {
+            const dx = straightedgeEnd.x - straightedgeStart.x;
+            const dy = straightedgeEnd.y - straightedgeStart.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const nx = (-dy / length) * (straightedgeWidth / 2);
+            const ny = (dx / length) * (straightedgeWidth / 2);
+
+            const topEdge = distanceToLine(
+              x,
+              y,
+              straightedgeStart.x + nx,
+              straightedgeStart.y + ny,
+              straightedgeEnd.x + nx,
+              straightedgeEnd.y + ny,
+            );
+            const bottomEdge = distanceToLine(
+              x,
+              y,
+              straightedgeStart.x - nx,
+              straightedgeStart.y - ny,
+              straightedgeEnd.x - nx,
+              straightedgeEnd.y - ny,
+            );
+
+            if (
+              topEdge.distance < snapDistance ||
+              bottomEdge.distance < snapDistance
+            ) {
+              activeEdge =
+                topEdge.distance < bottomEdge.distance ? "top" : "bottom";
+              const result = activeEdge === "top" ? topEdge : bottomEdge;
+              [lastX, lastY] = [result.point.x, result.point.y];
+              return;
+            }
+          }
+          [lastX, lastY] = [x, y];
+        }
+      });
+
+      drawingCanvas.addEventListener("mousemove", draw);
+      drawingCanvas.addEventListener("mouseup", () => {
+        isDrawing = false;
+        activeEdge = null;
+        startedInStraightedge = false;
+      });
+      drawingCanvas.addEventListener("mouseout", () => {
+        isDrawing = false;
+        activeEdge = null;
+        startedInStraightedge = false;
+      });
+
+      drawStraightedge();
+    </script>
+  </body>
+</html>
