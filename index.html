@@ -66,6 +66,10 @@
     <div class="toolbar">
       <button onclick="toggleStraightedge()">Toggle Straightedge</button>
       <button onclick="toggleCompass()">Toggle Compass</button>
+      <label>
+        Compass Angle: 
+        <input type="number" id="compassAngle" value="0" step="1" style="width: 60px"> °
+      </label>
     </div>
     <div class="canvas-container">
       <canvas id="drawingCanvas" width="600" height="400"></canvas>
@@ -110,6 +114,7 @@
 
       const compassCenterHandle = document.getElementById("compassCenter");
       const compassPointHandle = document.getElementById("compassPoint");
+      const compassAngleInput = document.getElementById("compassAngle");
 
       function updateHandlePositions() {
         startHandle.style.left = straightedgeStart.x + "px";
@@ -419,6 +424,12 @@
         } else {
           compassPoint.x = x;
           compassPoint.y = y;
+          const angle = Math.atan2(
+            compassPoint.y - compassCenter.y,
+            compassPoint.x - compassCenter.x
+          );
+          const degrees = Math.round((angle * 180) / Math.PI);
+          compassAngleInput.value = degrees;
         }
 
         updateCompassHandles();
@@ -458,6 +469,12 @@
           } else {
             compassPoint.x = x;
             compassPoint.y = y;
+            const angle = Math.atan2(
+              compassPoint.y - compassCenter.y,
+              compassPoint.x - compassCenter.x
+            );
+            const degrees = Math.round((angle * 180) / Math.PI);
+            compassAngleInput.value = degrees;
           }
           updateCompassHandles();
         } else if (activeHandle) {
@@ -545,6 +562,20 @@
       });
 
       drawStraightedge();
+
+      function updateCompassPointFromAngle() {
+        const radius = Math.hypot(
+          compassPoint.x - compassCenter.x,
+          compassPoint.y - compassCenter.y
+        );
+        const angleInRadians = (parseInt(compassAngleInput.value) * Math.PI) / 180;
+        
+        compassPoint.x = compassCenter.x + radius * Math.cos(angleInRadians);
+        compassPoint.y = compassCenter.y + radius * Math.sin(angleInRadians);
+        updateCompassHandles();
+      }
+
+      compassAngleInput.addEventListener("input", updateCompassPointFromAngle);
     </script>
   </body>
 </html>
